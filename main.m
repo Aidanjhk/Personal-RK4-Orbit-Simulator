@@ -106,7 +106,7 @@ for k = 1:N
     r = r + dt/6*(k1(1:3)+2*k2(1:3)+2*k3(1:3)+k4(1:3));
     v = v + dt/6*(k1(4:6)+2*k2(4:6)+2*k3(4:6)+k4(4:6));
 
-    % --- RK4 Attitude ---
+    % --- Euler Attitude ---
     w = w + dt*f_w(w);
     q = q + dt*f_q(q,w);
     q = q/norm(q);
