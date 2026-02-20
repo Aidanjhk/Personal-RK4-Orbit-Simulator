@@ -5,10 +5,12 @@
 
 clear; clc; close all;
 
+
+f_quat  = @(q,w) 0.5*w*q;
 %% ---------- Constants ----------
 mu = 398600;           
 Re = 6378;             
-dt = 0.1;              
+dt = 0.01;              
 tf = 86400;              % shorten for testing
 N  = floor(tf/dt);
 
@@ -43,12 +45,13 @@ thetaOld = zeros(3,1);
 %% ---------- Storage ----------
 positions = zeros(3,N);
 quats     = zeros(4,N);
+w = zeros(3,N+1);
 
 %% ---------- Orbit Dynamics ----------
 f_orbit = @(r,v)[v; -mu*r/norm(r)^3];
 
 %% ---------- Cube Geometry ----------
-Lx=800; Ly=400; Lz=400;
+Lx=400; Ly=400; Lz=800;
 
 V0 = [
    -Lx/2 -Ly/2 -Lz/2;
@@ -89,11 +92,36 @@ hCube2 = patch('Vertices',V0,'Faces',F,...
 
 view(45,30)
 
+%% Helper Functions
+function A = EulerAngles(e1,e2,e3,theta1,theta2,theta3)
+    I = eye(3);
+    v = @(e)[0 -e(3) e(2); e(3) 0 -e(1); -e(2) e(1) 0];
+    An = @(e,theta) I - sin(theta)*v(e) + (1-cos(theta))*(v(e)^2); 
+
+    A = An(e1,theta1)*An(e2,theta2)*An(e3,theta3);
+end
+function q = quaternionCalculator(A)
+    q4 = sqrt((trace(A) + 1)/4);
+    q3 = (A(2,3)-A(3,2))/(4*q4);
+    q2 = (A(3,1)-A(1,3))/(4*q4);
+    q1 = (A(1,2)-A(2,1))/(4*q4);
+
+    q = [q1;q2;q3;q4];
+end
+
+f_angacc  = @(w) (-inv(J))*cross(w,J*w);
+
+
+%% Initial Conditions
+w(1:3,1) = [0.01;0.01;0.01];
+q(1:4,1) = [0;0;0;1];
+
+q_prev = [0;0;0;1];
 %% ---------- MAIN LOOP ----------
 for k = 1:N
 
     positions(:,k) = r;
-    quats(:,k)     = q;
+    q(:,k)     = q_prev;
 
     % ---- Orbit RK4 ----
     k1 = f_orbit(r,v);
@@ -103,71 +131,61 @@ for k = 1:N
 
     r = r + (dt/6)*(k1(1:3)+2*k2(1:3)+2*k3(1:3)+k4(1:3));
     v = v + (dt/6)*(k1(4:6)+2*k2(4:6)+2*k3(4:6)+k4(4:6));
+    
+    k1 = f_angacc(w(:,k));
+    k2 = f_angacc(w(:,k) + 0.5*dt*k1(1:3));
+    k3 = f_angacc(w(:,k) + 0.5*dt*k2(1:3));
+    k4 = f_angacc(w(:,k) + dt*k3(1:3));
+    w(:,k+1) = w(:,k) + (dt/6)*(k1(1:3) + 2*k2(1:3) + 2*k3(1:3) + k4(1:3));
 
-    % ---- Rigid Body Dynamics ----
-    w = w + dt * (-J\(cross(w,J*w)));
+    w_matrix= [0 w(3,k+1) -w(2,k+1) w(1,k+1); -w(3,k+1) 0 w(1,k+1) w(2,k+1); w(2,k+1) -w(1,k+1) 0 w(3,k+1); -w(1,k+1) -w(2,k+1) -w(3,k+1) 0];
+    q_matrix = [q(4,k) q(3,k) -q(2,k); -q(3,k) q(4,k) q(1,k); q(2,k) -q(1,k) q(4,k); -q(1,k) -q(2,k) -q(3,k)];
 
-    % ---- Quaternion Increment ----
-    angle = norm(w)*dt;
+    k1 = f_quat(q_matrix,w_matrix);
+    k1_processed = [k1(2,3); k1(3,1); k1(1,2); k1(1,1)];
+    k2 = f_quat(q_matrix + 0.5*dt*k1,w_matrix);
+    k2_processed = [k2(2,3); k2(3,1); k2(1,2); k2(1,1)];
+    k3 = f_quat(q_matrix + 0.5*dt*k2,w_matrix);
+    k3_processed = [k3(2,3); k3(3,1); k3(1,2); k3(1,1)];
+    k4 = f_quat(q_matrix + dt*k3,w_matrix);
+    k4_processed = [k4(2,3); k4(3,1); k4(1,2); k4(1,1)];
 
-    axis = w / norm(w);
-    dq = axang2quat([axis.' angle]);
+    quats(:,k+1) = q(:,k) + (dt/6)*(k1_processed + 2*k2_processed + 2*k3_processed + k4_processed);
+    q = quats(:,k+1);
+    
+    timestamps(k) = dt*k;
+
+
+    % ---- Extract euler angles from Quaternions ----
    
-
-    q_mat = [q(4) q(1) q(2) q(3)];
-    q_mat = quatmultiply(q_mat,dq);
-    q_mat = q_mat / norm(q_mat);
-    q = [q_mat(2); q_mat(3); q_mat(4); q_mat(1)];
-
-    % ---- Extract Rotation Matrix from Quaternions ----
-    Rb = quat2dcm([q(4) q(1) q(2) q(3)]);
-
-    phi = atan2(Rb(3,2),Rb(3,3));
-    s   = max(-1,min(1,Rb(3,1)));
-    theta = -asin(s);
-    psi = atan2(Rb(2,1),Rb(1,1));
-
-    angles = [phi;theta;psi];
-
+    w_euler = [w(1,k+1) w(2,k+1) w(3,k+1)];
+    
     % ---- Desired Angular Position ----
-    angles_des = [0; pi/4; pi/4];
-
+    angles_des = [pi/4 0 pi/2];
+    angles = quat2eul([q(1) q(2) q(3) q(4)]);
+    
+    
     % ---- 3-axis controller ----
-    [angles,w,thetaOld] = axisWheelSim( ...
-        angles,w,thetaOld, ...
-        angles_des,dt, ...
-        0.50,1.0,diag(J),[1e-4;1e-4;1e-4]);
-
+    [angles,w_euler,thetaOld] = axisWheelSim( ...
+        angles,w_euler,thetaOld, ...
+        angles_des',dt, ...
+        1/dt,0.50,diag(J),[1e-4;1e-4;1e-4]);
+    angles = [angles(1,1) angles(2,2) angles(3,3)];
     x_err = angles_des(1) - angles(1);
     y_err = angles_des(2) - angles(2);
-    z_err = angles_des(2) - angles(2);
-    disp([x_err y_err]);
-
-
-    tol = 1e-4;
+    z_err = angles_des(3) - angles(3);
+    disp([x_err y_err z_err]);
 
     % ---- Build rotation matrix from controlled angles ----
-    Rb = Rx(angles(1))*Ry(angles(2));
-    
+    Rb = EulerAngles([1 0 0],[0 1 0],[0 0 1],angles(1),angles(2),angles(3));
 
     % ---- Update displays ----
     set(hCube1,'Vertices',(Rb*V0.').' + r.');
     set(hCube2,'Vertices',(Rb*V0.').');
 
+    q_prev = [q(1) q(2) q(3) q(4)];
+   
     drawnow limitrate
 end
 
 
-
-%% Rotation helpers
-function R = Rx(a)
-R = [1 0 0;0 cos(a) -sin(a);0 sin(a) cos(a)];
-end
-
-function R = Ry(a)
-R = [cos(a) 0 sin(a);0 1 0;-sin(a) 0 cos(a)];
-end
-
-function R = Rz(a)
-R = [cos(a) -sin(a) 0;sin(a) cos(a) 0;0 0 1];
-end
