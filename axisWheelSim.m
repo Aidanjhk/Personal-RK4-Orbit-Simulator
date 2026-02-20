@@ -1,34 +1,46 @@
-function [theta, omega, thetaOld] = axisWheelSim( ...
-    theta, omega, thetaOld, ...
-    theta_des, dt, wn, zeta, I, Td)
-    % INPUT:
-    % theta --> current rotation vector
-    % omega --> current angular velocity vector
-    % thetaOld --> previous rotation vector
-    % theta_des --> desired rotation vector
-    % dt --> time step
-    % wn --> natural undamped frequency
-    % zeta --> damping ratio
-    % I --> inertia diagonal  
-    % Td --> external & disturbance torque
-    % 
-    % OUTPUT:
-    % theta --> new rotation vector
-    % omega --> new angular velocity vector
-    % thetaOld --> current rotation vector
+function [theta_new, omega_new] = axisWheelSim( ...
+    theta_des, ...     % desired angle [rad]
+    theta, ...         % current angle [rad]
+    omega, ...         % current angular velocity [rad/s]
+    alpha_max_rw, ...  % max wheel angular acceleration [rad/s^2]
+    dt, ...
+    I_sat, ...
+    I_rw )
 
-    Ivec = I(:);
+    % --------------------------------------------
+    % Reaction wheel control with braking logic
+    % --------------------------------------------
     
-    Kf = (wn^2).*Ivec;
-    tau_r = (2*zeta*wn.*Ivec)./Kf;
+    % Angle error
+    err = theta_des - theta;
+
+    % Convert wheel acceleration limit to satellite limit
+    alpha_max_sat = abs((I_rw ./ I_sat) * alpha_max_rw);
+    omega_max_sat = alpha_max_sat*dt;
     
-    theta_e = theta - theta_des;
+    % Direction to target
+    dir = sign(err);
+    if dir == 0
+        theta_new = theta;
+        omega_new = omega;
+        return
+    end
     
-    Tc = -Kf .* ( theta_e + tau_r .* ((theta_e - thetaOld)/dt) );
+    % --- Compute stopping distance ---
+    % d_stop = w^2 / (2 * a_max)
+    d_stop = (omega^2) / (2 * alpha_max_sat);
     
-    omegaDot = (Tc + Td)./Ivec;
-    omega = omega + dt.*omegaDot;
-    theta = theta + dt.*omega;
+    % --- Decide accelerate or brake ---
+    if abs(err) > d_stop
+        % Accelerate toward target
+        alpha_sat = dir * alpha_max_sat;
+    else
+        % Brake
+        alpha_sat = -sign(omega) * alpha_max_sat;
+    end
     
-    thetaOld = theta_e;
+    % --- Integrate ---
+    omega_new = omega + (alpha_sat * dt);
+    theta_new = theta + (omega_new * dt);
+    
 end
