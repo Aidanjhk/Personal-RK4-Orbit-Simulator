@@ -157,7 +157,7 @@ for k = 1:N
     w_new_y = w(2,k+1);
     w_new_z = w(3,k+1);
 
-    %% ---------- 1-AXIS REACTION WHEEL CONTROLS, Deine new Angles ----------
+    %% ---------- 1-AXIS REACTION WHEEL CONTROLS, Define new Angles ----------
     if (norm(angles(3)-theta_des(3),2) > tol) % Z axis control
         [angles_new_z, w_new_z] = axisWheelSim( ...
             theta_des(3), ...
