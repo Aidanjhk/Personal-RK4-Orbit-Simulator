@@ -5,7 +5,8 @@ function [theta_new, omega_new] = axisWheelSim( ...
     alpha_max_rw, ...  % max wheel angular acceleration [rad/s^2]
     dt, ...
     I_sat, ...
-    I_rw )
+    I_rw, ...
+    omega_max)
 
     % --------------------------------------------
     % Reaction wheel control with braking logic
@@ -43,4 +44,7 @@ function [theta_new, omega_new] = axisWheelSim( ...
     omega_new = omega + (alpha_sat * dt);
     theta_new = theta + (omega_new * dt);
     
+    if (omega_new > omega_max)
+        omega_new = omega_max;
+    end
 end
