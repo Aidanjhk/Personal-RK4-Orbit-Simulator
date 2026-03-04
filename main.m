@@ -5,19 +5,22 @@
 clear all; clc; close all;
 
 %% 1) CONSTANTS
-mu = 398600e3;           
-Re = 6378e3;             
-dt = 1;              
-tf = 86400;           
+mu = 3.98600e14; 
+Acs = 0.03;
+angle = 0;
+Re = 6378e3;  
+m = 5;
+dt = 60;              
+tf = 60*24*365;           
 N  = floor(tf/dt);
 
 %% 2) INITIAL ORBIT SETUP
-a  = 400e3;
-e  = 0.00007;
-inc  = deg2rad(53);
-RAAN = deg2rad(219.77);
-argp = deg2rad(332.17);
-E0   = deg2rad(44.66);
+a  = 450e3 + Re;
+e  = 0.0005;
+inc  = deg2rad(90);
+RAAN = deg2rad(90);
+argp = deg2rad(0);
+E0   = deg2rad(0);
 
 n = sqrt(mu/a^3);
 
@@ -56,11 +59,11 @@ J_rw  = [0.00225049e-3 0.00830119e-3 0.00830119e-3];
 referenceDirections = [1 0 0; 0 1 0; 0 0 1];
 
 %% 4) CONTROL SETUP
-theta_des = [pi/2; pi/4; pi/4];   % desired Euler angles
+theta_des = [pi/2; pi/3; pi/4];   % desired Euler angles
 alpha_rw_max = 1e-4;                % wheel accel limit
 
 %% 5) CUBE GEOMETRY
-Lx=400; Ly=400; Lz=800;
+Lx=400; Ly=400; Lz=1200;
 
 V0 = [
    -Lx/2 -Ly/2 -Lz/2;
@@ -80,12 +83,12 @@ xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
 title('Inertial Frame')
 
 [Xe,Ye,Ze] = sphere(60);
-surf(Re*Xe/1000,Re*Ye/1000,Re*Ze/1000,'FaceColor',[0.3 0.6 1],'EdgeColor','none');
+surf(Re*Xe/10,Re*Ye/10,Re*Ze/10,'FaceColor',[0.3 0.6 1],'EdgeColor','none');
 lighting gouraud; camlight headlight
 
 hCube1 = patch('Vertices',V0+r(:,1).','Faces',F,...
     'FaceColor','r','EdgeColor','k','FaceAlpha',0.9);
-xlim([-1e5 1e5]); ylim([-1e5 1e5]); zlim([-1e5 1e5]);
+xlim([-1e7 1e7]); ylim([-1e7 1e7]); zlim([-1e7 1e7]);
 
 %% 7) FIGURE 2 – BODY FRAME
 figure(2); clf; hold on; axis equal; grid on;
@@ -104,26 +107,47 @@ view(45,30)
 timestamps = zeros(1,N);
 
 %% DYNAMICS FUNCTIONS
-f_orbit = @(r_current,v_current)[ ...
+f_orbit = @(r_current,v_current,adrag)[ ...
     v_current;
-    -mu*r_current/norm(r_current)^3 ];
+    (-mu*r_current/norm(r_current,2)^3) + (adrag)];
 f_angacc  = @(w_current,J) (-inv(J))*cross(w_current,J*w_current);
 
 %% 9) MAIN LOOP
-for k = 2:N
+for k = 1:N
+    [Tatm,~,~,rho] = atmosisa(norm(r(:,k),2));
+    norm(r(:,k),2)
+    sigma_t = @(theta) 0.93 - (1.48e-3)*theta - (7e-5)*(theta^2);
+    sigma_n = @(theta) 0.63*(1 - exp(-3.38e-2 * theta));
+
+    Cd = dragCoefficientCalculator(8314.5,Tatm, 26.98, norm(v(:,k),2), sigma_t, sigma_n, deg2rad(angle));
 
     %% ---------- ORBIT RK4 ----------
-    k1 = f_orbit(r(:,k),v(:,k));
-    k2 = f_orbit(r(:,k)+0.5*dt*k1(1:3), v(:,k)+0.5*dt*k1(4:6));
-    k3 = f_orbit(r(:,k)+0.5*dt*k2(1:3), v(:,k)+0.5*dt*k2(4:6));
-    k4 = f_orbit(r(:,k)+dt*k3(1:3), v(:,k)+dt*k3(4:6));
+
+    Fd_k1 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd, v(:,k));
+    a_drag_k1 = Fd_k1/m;
+    k1 = f_orbit(r(:,k),v(:,k),a_drag_k1);
+    
+    Fd_k2 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd, v(:,k)+0.5*dt*k1(4:6));
+    a_drag_k2 = Fd_k2/m;
+    k2 = f_orbit(r(:,k)+0.5*dt*k1(1:3), v(:,k)+0.5*dt*k1(4:6),a_drag_k2);
+
+    Fd_k3 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd, v(:,k)+0.5*dt*k2(4:6));
+    a_drag_k3 = Fd_k3/m;
+    k3 = f_orbit(r(:,k)+0.5*dt*k2(1:3), v(:,k)+0.5*dt*k2(4:6),a_drag_k3);
+
+    Fd_k4 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd, v(:,k)+dt*k3(4:6));
+    a_drag_k4 = Fd_k4/m;
+    k4 = f_orbit(r(:,k)+dt*k3(1:3), v(:,k)+dt*k3(4:6),a_drag_k4);
 
     r(:,k+1) = r(:,k) + (dt/6)*(k1(1:3)+2*k2(1:3)+2*k3(1:3)+k4(1:3));
     v(:,k+1) = v(:,k) + (dt/6)*(k1(4:6)+2*k2(4:6)+2*k3(4:6)+k4(4:6));
 
     %% ---------- ATTITUDE DYNAMICS ----------
-    
-    controlTorque_RW = axisWheelTorqueOutput(theta,theta_des,J_sat,dt,1,k);
+    if (k > 1)
+        controlTorque_RW = axisWheelTorqueOutput(theta,theta_des,J_sat,dt,1,k);
+    else
+        controlTorque_RW = 0;
+    end
     L_ext = [0 0 0];
     u = (-controlTorque_RW ./ J_rw);
     k1 = satAttitudeControl( w(:,k), wRW(:,k), u, diag(J_sat), diag(J_rw), referenceDirections, controlTorque_RW, L_ext);
@@ -166,12 +190,17 @@ for k = 2:N
     timestamps(k) = k*dt;
 
     % Inertial display
-    set(hCube1,'Vertices',(Rb*V0.').'*5 + (r(:,k+1)/5).');
+    set(hCube1,'Vertices',(Rb*V0.').'*5*100 + (r(:,k+1)/5).');
 
     % Body display
     set(hCube2,'Vertices',(Rb*V0.').');
-
-    drawnow limitrate
+    
+    drawnow
+    
 
 
 end
+
+figure(3)
+
+plot3(r(1,:),r(2,:),r(3,:))
