@@ -11,7 +11,7 @@ angle = 0;
 Re = 6378e3;  
 m = 5;
 dt = 60;              
-tf = 60*24*365;           
+tf = 3600*24*365;           
 N  = floor(tf/dt);
 
 %% 2) INITIAL ORBIT SETUP
@@ -119,23 +119,25 @@ for k = 1:N
     sigma_t = @(theta) 0.93 - (1.48e-3)*theta - (7e-5)*(theta^2);
     sigma_n = @(theta) 0.63*(1 - exp(-3.38e-2 * theta));
 
-    Cd = dragCoefficientCalculator(8314.5,Tatm, 26.98, norm(v(:,k),2), sigma_t, sigma_n, deg2rad(angle));
-
+    
     %% ---------- ORBIT RK4 ----------
-
-    Fd_k1 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd, v(:,k));
+    Cd_k1 = dragCoefficientCalculator(8314.5,Tatm, 26.98, norm(v(:,k),2), sigma_t, sigma_n, deg2rad(angle),r(:,k));
+    Fd_k1 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd_k1, v(:,k));
     a_drag_k1 = Fd_k1/m;
     k1 = f_orbit(r(:,k),v(:,k),a_drag_k1);
     
-    Fd_k2 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd, v(:,k)+0.5*dt*k1(4:6));
+    Cd_k2 = dragCoefficientCalculator(8314.5,Tatm, 26.98, norm(v(:,k),2), sigma_t, sigma_n, deg2rad(angle),r(:,k)+0.5*dt*k1(1:3));
+    Fd_k2 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd_k2, v(:,k)+0.5*dt*k1(4:6));
     a_drag_k2 = Fd_k2/m;
     k2 = f_orbit(r(:,k)+0.5*dt*k1(1:3), v(:,k)+0.5*dt*k1(4:6),a_drag_k2);
 
-    Fd_k3 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd, v(:,k)+0.5*dt*k2(4:6));
+    Cd_k3 = dragCoefficientCalculator(8314.5,Tatm, 26.98, norm(v(:,k),2), sigma_t, sigma_n, deg2rad(angle),r(:,k)+0.5*dt*k2(1:3));
+    Fd_k3 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd_k3, v(:,k)+0.5*dt*k2(4:6));
     a_drag_k3 = Fd_k3/m;
     k3 = f_orbit(r(:,k)+0.5*dt*k2(1:3), v(:,k)+0.5*dt*k2(4:6),a_drag_k3);
 
-    Fd_k4 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd, v(:,k)+dt*k3(4:6));
+    Cd_k4 = dragCoefficientCalculator(8314.5,Tatm, 26.98, norm(v(:,k),2), sigma_t, sigma_n, deg2rad(angle),r(:,k)+dt*k3(1:3));
+    Fd_k4 = dragCalcRectangularPrism(Acs, deg2rad(angle), rho, Cd_k4, v(:,k)+dt*k3(4:6));
     a_drag_k4 = Fd_k4/m;
     k4 = f_orbit(r(:,k)+dt*k3(1:3), v(:,k)+dt*k3(4:6),a_drag_k4);
 
@@ -144,7 +146,7 @@ for k = 1:N
 
     %% ---------- ATTITUDE DYNAMICS ----------
     if (k > 1)
-        controlTorque_RW = axisWheelTorqueOutput(theta,theta_des,J_sat,dt,1,k);
+        controlTorque_RW = axisWheelTorqueOutput(theta,theta_des,J_sat,dt,1/sqrt(2),k);
     else
         controlTorque_RW = 0;
     end
